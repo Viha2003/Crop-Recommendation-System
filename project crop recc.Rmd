@@ -1,0 +1,222 @@
+---
+title: "EDA PROJECT"
+author: "20MIA1034"
+date: "2024-03-13"
+output: html_document
+---
+```{r}
+# Importing necessary libraries
+library(tidyverse)
+library(ggplot2)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(e1071)
+
+```
+```{r}
+# Reading CSV file into a data frame
+df <- read.csv("C:\\Users\\vihar\\Downloads\\Crop_recommendation (1).csv")
+```
+```{r}
+str(df)
+```
+```{r}
+summary(df)
+```
+```{r}
+# Getting unique values in the 'label' column
+unique_labels <- unique(df$label)
+unique_labels
+```
+```{r}
+# Getting value counts for the 'label' column
+label_value_counts <- table(df$label)
+label_value_counts
+
+# Checking null values of each column
+null_value_counts <- colSums(is.na(df))
+null_value_counts
+
+```
+```{r}
+# Setting the palette and plotting the countplot
+palette <- c("Set3")
+palette_set <- scales::hue_pal()(length(unique(df$label)))
+names(palette_set) <- unique(df$label)
+palette_set
+
+# Plotting the countplot
+ggplot(df, aes(x = label)) +
+  geom_bar(fill = palette_set) +
+  theme_minimal() +
+  labs(title = "Count of Each Crop", x = "Crop", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+```{r}
+# Define a function to visualize statistical plots
+visualise <- function(df, col) {
+  par(mfrow=c(1,3))
+  hist(df[[col]], col = "pink", main = paste("Histogram of", col))
+  qqnorm(df[[col]])
+  qqline(df[[col]])
+  boxplot(df[[col]], col = "pink", main = paste("Boxplot of", col))
+}
+
+# Apply the function to each column in the dataframe
+for (col in names(df)[1:length(df)-1]) {
+  cat(paste("Statistical plots for:", col, "are shown below\n"))
+  visualise(df, col)
+  cat("\n", paste(rep("-", 60), collapse = ""), "\n")
+}
+
+```
+```{r}
+# Create histograms for numeric attributes
+numeric_attributes <- c('N', 'P', 'K', 'ph', 'rainfall', 'humidity', 'temperature')
+
+par(mfrow=c(3, 3))
+for (i in 1:length(numeric_attributes)) {
+  hist(df[[numeric_attributes[i]]], main=paste("Histogram of", numeric_attributes[i]), xlab=numeric_attributes[i], col="skyblue", breaks=20)
+}
+
+```
+```{r}
+# Create box plots for numeric attributes 'N', 'P', and 'K'
+boxplot(df[, c("N", "P", "K")], col="skyblue", main="Box Plots for Nutrient Levels (N, P, K)", ylab="Values")
+
+```
+```{r}
+# Create features and target variables
+features <- df[, c('N', 'P', 'K', 'temperature', 'humidity', 'ph', 'rainfall')]
+target <- df$label
+labels <- df$label
+
+```
+```{r}
+# Initializing empty lists to append all model names and corresponding accuracies
+acc <- list()
+model <- list()
+
+```
+```{r}
+# Install and load the caret package
+library(caret)
+
+# Split the dataset into training and testing sets
+set.seed(2)  # Set a random seed for reproducibility
+train_indices <- createDataPartition(target, p = 0.75, list = FALSE)
+Xtrain <- features[train_indices, ]
+Xtest <- features[-train_indices, ]
+Ytrain <- target[train_indices]
+Ytest <- target[-train_indices]
+
+```
+```{r}
+# Load the required library
+library(rpart)
+
+# Create and train the decision tree model
+DecisionTree <- rpart(label ~ ., data = df, method = "class", control = rpart.control(maxdepth = 5, cp = 0), parms = list(split = "information"))
+# Note: The parameters in rpart.control and parms are used to set the criterion to "entropy" and the random state to 2, respectively.
+
+# Make predictions on the test set
+predicted_values <- predict(DecisionTree, newdata = Xtest, type = "class")
+
+# Calculate the accuracy
+accuracy <- sum(predicted_values == Ytest) / length(Ytest)
+acc <- c(acc, accuracy)
+model <- c(model, "Decision Tree")
+
+# Print the accuracy
+print(paste("Decision Tree's Accuracy is:", accuracy * 100))
+
+# Print the classification report
+print(table(Ytest, predicted_values))
+
+```
+```{r}
+# Load the required library
+library(caret)
+
+# Define the cross-validation method
+ctrl <- trainControl(method = "cv", number = 5)
+
+# Train the model using cross-validation
+model <- train(label ~ ., data = df, method = "rpart", trControl = ctrl)
+
+# Access the cross-validated performance metrics
+print(model$results$Accuracy)
+
+```
+```{r}
+# Load the required library
+library(glmnet)
+
+# Create and train the logistic regression model
+LogReg <- glm(label ~ ., data = df,family = "binomial")
+
+# Make predictions on the test set
+predicted_values <- predict(LogReg, newdata = Xtest, type = "response")
+
+# Convert predicted probabilities to class labels
+predicted_values <- ifelse(predicted_values > 0.5, 1, 0)
+
+# Calculate the accuracy
+accuracy <- sum(predicted_values == Ytest) / length(Ytest)
+acc <- c(acc, accuracy)
+model <- c(model, "Logistic Regression")
+
+# Print the accuracy
+print(paste("Logistic Regression's Accuracy is:", accuracy))
+
+# Print the classification report
+print(table(Ytest, predicted_values))
+
+```
+```{r}
+dataset=df
+# Run this line if you haven't installed the caret package
+library(caret)
+set.seed(123)  # Set a seed for reproducibility
+train_indices <- createDataPartition(dataset$label, p = 0.8, list = FALSE)
+train_data <- dataset[train_indices, ]
+test_data <- dataset[-train_indices, ]
+```
+```{r}
+library(class)
+k <- 4
+knn_model <- knn(train_data[, -8], test_data[, -8], train_data$label, k)
+
+```
+```{r}
+# 4. Calculate accuracy
+accuracy <- sum(knn_model == test_data$label) / length(test_data$label)
+
+# Print the accuracy
+accuracy
+```
+```{r}
+k_values <- 1:10
+wcss <- vector("numeric", length(k_values))
+
+for (i in k_values) {
+  kmeans_model <- kmeans(dataset[, -8], centers = i)
+  wcss[i] <- kmeans_model$tot.withinss
+}
+
+```
+```{r}
+plot(k_values, wcss, type = "b", pch = 19, frame = FALSE, xlab = "Number of Clusters (k)", ylab = "WCSS", main = "Elbow Method")
+
+```
+```{r}
+# Create the confusion matrix
+confusion_matrix <- table(test_data$label, knn_model)
+
+# Print the confusion matrix
+print(confusion_matrix)
+```
+
+

@@ -1,0 +1,380 @@
+---
+title: "Untitled"
+author: "Tim John Chandy-20MIA1091"
+date: "13 April 2024"
+output: html_document
+---
+```{r}
+# Data science
+library(tidyverse)
+library(janitor)
+library(DataExplorer)
+library(skimr)
+#install.packages("rlang")
+# Modeling
+#library(tidymodels)
+
+# Visualization
+library(ggrepel)
+library(GGally)
+library(vip)
+library(patchwork)
+
+# Tables
+library(gt)
+```
+
+```{r}
+crop <- read_csv("C:/Users/Tim/Downloads/Crop_recommendation.csv")
+```
+```{r}
+skim(crop)
+```
+```{r}
+plot_histogram(crop)
+```
+```{r}
+plot_bar(crop)
+```
+```{r}
+agro <- crop %>%
+  filter(label %in% c("chickpea", "coffee", "cotton", "lentil", "maize", "rice")) %>% 
+  mutate(label = factor(label))
+```
+```{r}
+agro %>% 
+  pivot_longer(N:rainfall, names_to = "Feature", values_to = "value") %>% 
+  ggplot(aes(x = value)) +
+  geom_histogram(fill = "steelblue") +
+  labs(x = "Value", y = "Count", fill = NULL) +
+  theme_bw() +
+  facet_wrap(~Feature, scales = "free") 
+```
+```{r}
+agro %>% 
+  pivot_longer(N:rainfall, names_to = "Feature", values_to = "value") %>% 
+  ggplot(aes(x = value, fill = label)) +
+  geom_histogram(alpha = 0.5) +
+  labs(x = "Value", y = "Count", fill = NULL) +
+  theme_bw() +
+  facet_wrap(~Feature, scales = "free") 
+```
+```{r}
+agro %>% 
+  pivot_longer(N:rainfall, names_to = "Feature", values_to = "value") %>% 
+  ggplot(aes(x = value, fill = label)) +
+  geom_density(alpha = 0.5) +
+  labs(fill = NULL) +
+  theme_bw() +
+  facet_wrap(~Feature, scales = "free") 
+```
+```{r}
+agro %>% 
+  pivot_longer(N:rainfall, names_to = "Feature", values_to = "value") %>% 
+  ggplot(aes(x = label, y = value)) +
+  geom_boxplot() +
+  labs(x = "Population", y = "Count", fill = NULL) +
+  theme_bw() +
+  coord_flip() +
+  facet_wrap(~Feature, scales = "free_x", ncol = 4) +
+  theme(legend.position = "top")
+```
+```{r}
+agro %>% 
+  ggpairs(columns = 1:7) 
+```
+
+```{r}
+agro %>% 
+  ggpairs(columns = 1:7, ggplot2::aes(colour=label)) 
+
+```
+
+```{r}
+set.seed(12345)
+library(tidymodels)
+# split the data into trainng (75%) and testing (25%)
+agro_split <- initial_split(agro, prop = 3/4)
+agro_split
+```
+```{r}
+agro_train <- training(agro_split)
+agro_test <- testing(agro_split)
+```
+```{r}
+agro_cv <- vfold_cv(agro_train)
+```
+```{r}
+# define the recipe
+agro_recipe <- recipe(label ~ ., data = agro) %>%
+  step_normalize(all_numeric())
+```
+```{r}
+rf_model <- 
+  rand_forest() %>%
+  set_args(mtry = tune()) %>%
+  set_engine("ranger", importance = "permutation") %>%
+  set_mode("classification") 
+
+rf_model
+```
+
+```{r}
+# show what will be tuned
+rf_model %>%    
+  parameters()
+```
+```{r}
+rf_workflow <- workflow() %>%
+  add_model(rf_model) %>% 
+  add_recipe(agro_recipe)
+```
+```{r}
+library(ranger)
+# specify which values want to try
+rf_grid <- expand.grid(mtry = c(2, 3, 4, 5, 6))
+
+# extract results
+rf_tune_results <- rf_workflow %>%
+  tune_grid(resamples = agro_cv, #CV object
+            grid = rf_grid, # grid of values to try
+            metrics = metric_set(accuracy, precision, recall) # metrics we care about
+            )
+
+```
+```{r}
+# print results
+rf_tune_results %>%
+  collect_metrics()
+```
+```{r}
+# Accuracy
+rf_tune_results %>% 
+  show_best(metric = "accuracy")
+```
+```{r}
+# Plotting metrics
+autoplot(rf_tune_results)
+```
+```{r}
+param_final <- rf_tune_results %>%
+  select_best(metric = "accuracy")
+
+param_final
+```
+```{r}
+rf_workflow <- rf_workflow %>%
+  finalize_workflow(param_final)
+```
+```{r}
+# fit on the training set and evaluate on test set
+rf_fit <- rf_workflow %>%
+  last_fit(agro_split)
+
+# Metrics
+test_performance <- rf_fit %>% 
+  collect_metrics()
+
+test_performance
+```
+```{r}
+test_predictions <- rf_fit %>% 
+  collect_predictions()
+
+test_predictions
+```
+```{r}
+cm_rf <- test_predictions %>% 
+  conf_mat(truth = label, estimate = .pred_class)
+
+# Plot the confusion matrix
+p1 <- autoplot(cm_rf, type = "heatmap") +
+  scale_fill_gradient(low="#D6EAF8",high = "#2E86C1") +
+  labs(title = "Random Forest") +
+  theme(plot.title = element_text(hjust = 0.5))
+p1
+```
+```{r}
+final_model <- fit(rf_workflow, agro)
+final_model
+```
+```{r}
+rf_fit %>% 
+  pluck(".workflow", 1) %>%   
+  pull_workflow_fit() %>% 
+  vip(aesthetics = list(fill = "steelblue")) + 
+  theme_minimal()
+```
+```{r}
+## SVM
+svm_model <- 
+  svm_poly() %>%
+  set_engine("kernlab") %>%
+  set_mode("classification") 
+
+svm_model
+```
+```{r}
+# show what will be tuned
+svm_model %>%    
+  parameters() 
+```
+```{r}
+svm_workflow <- workflow() %>%
+  add_model(svm_model) %>% 
+  add_recipe(agro_recipe)
+```
+```{r}
+library(kernlab)
+# fit on the training set and evaluate on test set
+svm_fit <- svm_workflow %>%
+  last_fit(agro_split)
+```
+```{r}
+svm_performance <- svm_fit %>% 
+  collect_metrics()
+
+svm_performance
+```
+```{r}
+test_predictions <- svm_fit %>% 
+  collect_predictions()
+
+test_predictions
+```
+```{r}
+cm_svm <- test_predictions %>% 
+  conf_mat(truth = label, estimate = .pred_class)
+
+# Plot the confusion matrix
+p2 <- autoplot(cm_svm, type = "heatmap") +
+  scale_fill_gradient(low="#D6EAF8",high = "#2E86C1") +
+  labs(title = "Support Vector Machine") +
+  theme(plot.title = element_text(hjust = 0.5))
+p2
+```
+```{r}
+final_model <- fit(svm_workflow, agro)
+```
+```{r}
+final_model
+
+```
+```{r}
+xgb_model <- boost_tree() %>% 
+  set_args(mtry = tune()) %>%
+  set_engine("xgboost") %>% 
+  set_mode("classification")
+
+xgb_model
+```
+```{r}
+# show what will be tuned
+xgb_model %>%    
+  parameters() 
+```
+```{r}
+xgb_workflow <- workflow() %>%
+  add_formula(label ~ .) %>%
+  add_model(xgb_model)
+
+xgb_workflow
+```
+```{r}
+xgb_grid <- grid_latin_hypercube(
+                                finalize(mtry(), agro_train),
+                                size = 30
+                                )
+
+xgb_tune_results <- tune_grid(
+                              xgb_workflow,
+                              resamples = agro_cv,
+                              grid = xgb_grid,
+                              metrics = metric_set(accuracy, precision, recall) # metrics we care about
+                              )
+```
+```{r}
+# print results
+xgb_tune_results %>%
+  collect_metrics()
+```
+```{r}
+# Accuracy
+xgb_tune_results %>% 
+  show_best(metric = "accuracy")
+```
+```{r}
+# Plotting metrics
+autoplot(xgb_tune_results)
+```
+```{r}
+param_final <- xgb_tune_results %>%
+  select_best(metric = "accuracy")
+
+param_final
+```
+```{r}
+xgb_workflow <- xgb_workflow %>%
+  finalize_workflow(param_final)
+```
+
+```{r}
+# fit on the training set and evaluate on test set
+xgb_fit <- xgb_workflow %>%
+  last_fit(agro_split)
+
+# Metrics
+test_performance <- xgb_fit %>% 
+  collect_metrics()
+
+test_performance
+```
+```{r}
+test_predictions <- xgb_fit %>% 
+  collect_predictions()
+
+test_predictions
+```
+```{r}
+cm_xgb <- test_predictions %>% 
+  conf_mat(truth = label, estimate = .pred_class)
+
+# Plot the confusion matrix
+p3 <- autoplot(cm_xgb, type = "heatmap") +
+  scale_fill_gradient(low="#D6EAF8",high = "#2E86C1") +
+  labs(title = "XGBoost") +
+  theme(plot.title = element_text(hjust = 0.5))
+p3
+```
+```{r}
+p1 + p2 + p3
+```
+```{r}
+# Extract accuracy for Random Forest
+rf_accuracy <- test_performance %>%
+  filter(.metric == "accuracy") %>%
+  pull(.estimate)
+
+# Add accuracy to plot
+p1 <- p1 +
+  annotate("text", x = Inf, y = Inf, 
+           label = sprintf("Accuracy: %.2f", rf_accuracy), 
+           vjust = 1, hjust = 1, size = 5)
+rf_accuracy
+```
+
+```{r}
+# Extract accuracy for SVM
+svm_accuracy <- svm_performance %>%
+  filter(.metric == "accuracy") %>%
+  pull(.estimate)
+
+# Add accuracy to plot
+p2 <- p2 +
+  annotate("text", x = Inf, y = Inf, 
+           label = sprintf("Accuracy: %.2f", svm_accuracy), 
+           vjust = 1, hjust = 1, size = 5)
+svm_accuracy
+```
+
+
